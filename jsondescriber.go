@@ -1,6 +1,7 @@
 package jsondescriber
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -55,26 +56,22 @@ func descElem(counts map[string]uint) []string {
 }
 
 // Creates a key:type mapping from a RawObject for comparison
-func (o *RawObject) Inventory() (map[string]string, error) {
+func (o *RawObject) Inventory() map[string]string {
 	var (
-		inv  = make(map[string]string)
-		obj  = *o
-		typ  *string
-		err  error
-		lerr error
+		inv = make(map[string]string)
+		obj = *o
+		typ *string
 	)
 
 	for k := range obj {
-		if typ, err = TypeOf(obj[k]); err != nil {
-			lerr = err
-		}
+		typ, _ = TypeOf(obj[k])
 		inv[k] = *typ
 	}
 
-	return inv, lerr
+	return inv
 }
 
-// Generates a friendly string from a JsonDescription, with Oxford comma and correct plurals
+// Generates a grammatical English-language list from a JsonDescription
 func (jd *JsonDescription) Friendly() string {
 	var descr string = "undefined"
 
@@ -181,4 +178,122 @@ func TypeOf(data []byte) (*string, error) {
 	}
 
 	return &typ, err
+}
+
+// this.Diff(that) maps keys of elements changed from this *RawObject to that one into four categories: added, deleted, modified, or typechanged
+func (o *RawObject) Diff(n *RawObject) map[string][]string {
+	var (
+		add = make([]string, 0)
+		del = make([]string, 0)
+		mod = make([]string, 0)
+		typ = make([]string, 0)
+	)
+
+	this := *o
+	that := *n
+
+	for k := range this {
+		if that[k] == nil {
+			del = append(del, k)
+		} else {
+			ot, _ := TypeOf(this[k])
+			nt, _ := TypeOf(that[k])
+
+			if *ot != *nt {
+				typ = append(typ, k)
+			} else if !bytes.Equal(this[k], that[k]) {
+				mod = append(mod, k)
+			}
+		}
+	}
+
+	for k := range that {
+		if this[k] == nil {
+			add = append(add, k)
+		}
+	}
+
+	return map[string][]string{
+		"added":       add,
+		"deleted":     del,
+		"modified":    mod,
+		"typechanged": typ,
+	}
+}
+
+// this.DiffCount(that) counts members changed from this *RawObject to that one: added, deleted, modified, or typechanged
+func (o *RawObject) DiffCount(n *RawObject) map[string]uint {
+	diff := make(map[string]uint)
+
+	this := *o
+	that := *n
+
+	for k := range this {
+		if that[k] == nil {
+			diff["deleted"] += 1
+		} else {
+			ot, _ := TypeOf(this[k])
+			nt, _ := TypeOf(that[k])
+
+			if *ot != *nt {
+				diff["typechanged"] += 1
+			} else if !bytes.Equal(this[k], that[k]) {
+				diff["modified"] += 1
+			}
+		}
+	}
+
+	for k := range that {
+		if this[k] == nil {
+			diff["added"] += 1
+		}
+	}
+
+	return diff
+}
+
+// UnmarshalArray is a convenience function wrapping json.Unmarshal to a new RawArray
+func UnmarshalArray(in []byte) (*RawArray, error) {
+	var (
+		arr = new(RawArray)
+		typ *string
+		err error
+	)
+
+	typ, err = TypeOf(in)
+
+	if err != nil {
+		return arr, err
+	}
+
+	if *typ != "array" {
+		err = fmt.Errorf("given []byte is %s, expected array", *typ)
+		return arr, err
+	}
+
+	err = json.Unmarshal(in, &arr)
+	return arr, err
+}
+
+// UnmarshalObject is a convenience function wrapping json.Unmarshal to a new RawObject
+func UnmarshalObject(in []byte) (*RawObject, error) {
+	var (
+		obj = new(RawObject)
+		typ *string
+		err error
+	)
+
+	typ, err = TypeOf(in)
+
+	if err != nil {
+		return obj, err
+	}
+
+	if *typ != "object" {
+		err = fmt.Errorf("given []byte is %s, expected object", *typ)
+		return obj, err
+	}
+
+	err = json.Unmarshal(in, &obj)
+	return obj, err
 }
